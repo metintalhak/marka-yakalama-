@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="tr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Marka Yakalama Oyunu</title>
+<style>
+:root{--brand:#e63946;--bg:#fff7f0;--ink:#1d1d1f;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1b1f;--ink:#f5f5f5}}
+:root[data-theme="dark"]{--bg:#1b1b1f;--ink:#f5f5f5}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,sans-serif;display:flex;justify-content:center;align-items:center}
+#wrap{position:relative;width:100%;max-width:420px;height:100%;max-height:720px}
+canvas{width:100%;height:100%;display:block;touch-action:none;border-radius:16px;background:#fff}
+.ov{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;background:rgba(0,0,0,.6);color:#fff;border-radius:16px;padding:24px}
+.ov h1,.ov h2{margin:0}.ov p{margin:0;opacity:.9}
+button{background:var(--brand);color:#fff;border:0;border-radius:999px;padding:12px 26px;font-size:16px;font-weight:700;cursor:pointer}
+button.alt{background:#555}
+.hidden{display:none}
+#adm{justify-content:flex-start;align-items:stretch;overflow:auto;text-align:left;background:rgba(20,20,24,.96);gap:8px}
+#adm label{display:flex;flex-direction:column;gap:2px;font-size:13px}
+#adm input[type=text],#adm input[type=password]{padding:8px;border-radius:8px;border:1px solid #666;background:#222;color:#fff;font-size:15px}
+#adm input[type=color]{width:100%;height:36px;border:0;background:none}
+#adm .row{display:flex;gap:8px;flex-wrap:wrap}
+#gear{position:fixed;right:10px;bottom:calc(10px + env(safe-area-inset-bottom,0px));z-index:5;padding:8px 12px;font-size:18px;opacity:.7}
+</style></head><body>
+<div id="wrap">
+<canvas id="c" width="420" height="720"></canvas>
+<div id="start" class="ov"><h1 id="t"></h1><p id="d"></p><button id="go">BAŞLA</button></div>
+<div id="end" class="ov hidden"><h1>Süre doldu!</h1><p id="sc"></p><button id="again">TEKRAR OYNA</button></div>
+<div id="adm" class="ov hidden"></div>
+</div>
+<button id="gear" class="hidden" title="Yönetim paneli">⚙️</button>
+<script>
+const $ = i => document.getElementById(i);
+const PIN = "1234"; // Yönetim paneli şifresi: buradan değiştir
+const DEF = {brandName:"MARKA ADI",color:"#e63946",title:"Hediyeleri Yakala!",desc:"Sepeti sürükle, hediyeleri topla, bombalardan kaç.",
+  good:["🎁","⭐","🍕"],bad:["💣"],duration:30,badRatio:22,speed:1,basketW:90,goodPts:10,badPts:15};
+let S = {...DEF};
+try { Object.assign(S, JSON.parse(localStorage.getItem("oyunCfg") || "{}")); } catch (e) {}
+try { const p = new URLSearchParams(location.search).get("c"); if (p) Object.assign(S, JSON.parse(decodeURIComponent(escape(atob(p))))); } catch (e) {}
+
+const cv = $("c"), ctx = cv.getContext("2d"), W = 420, H = 720;
+const basket = { w: S.basketW, h: 28, y: H - 70 };
+document.documentElement.style.setProperty("--brand", S.color);
+$("t").textContent = S.title; $("d").textContent = S.desc;
+let items = [], score = 0, timeLeft = S.duration, last = 0, running = false, spawnT = 0, px = W / 2;
+
+function start() {
+  items = []; score = 0; timeLeft = S.duration; spawnT = 0; last = performance.now(); running = true;
+  $("start").classList.add("hidden"); $("end").classList.add("hidden");
+  requestAnimationFrame(loop);
+}
+function move(e) {
+  const r = cv.getBoundingClientRect();
+  px = Math.max(basket.w / 2, Math.min(W - basket.w / 2, (e.clientX - r.left) / r.width * W));
+}
+cv.addEventListener("pointermove", move); cv.addEventListener("pointerdown", move);
+
+function loop(now) {
+  if (!running) return;
+  const dt = Math.min((now - last) / 1000, 0.05); last = now;
+  timeLeft -= dt; spawnT -= dt;
+  if (spawnT <= 0) {
+    const bad = Math.random() < S.badRatio / 100, pool = bad ? S.bad : S.good;
+    items.push({ x: 30 + Math.random() * (W - 60), y: -30, v: (160 + Math.random() * 120 + (S.duration - timeLeft) * 4) * S.speed, e: pool[Math.floor(Math.random() * pool.length)], bad });
+    spawnT = (0.55 - Math.min(0.3, (S.duration - timeLeft) * 0.01)) / S.speed;
+  }
+  for (const it of items) it.y += it.v * dt;
+  items = items.filter(it => {
+    const hit = it.y > basket.y - 10 && it.y < basket.y + basket.h && Math.abs(it.x - px) < basket.w / 2 + 6;
+    if (hit) { score = Math.max(0, score + (it.bad ? -S.badPts : S.goodPts)); return false; }
+    return it.y < H + 30;
+  });
+  draw();
+  if (timeLeft <= 0) return finish();
+  requestAnimationFrame(loop);
+}
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = S.color; ctx.fillRect(0, 0, W, 64);
+  ctx.fillStyle = "#fff"; ctx.font = "700 20px system-ui"; ctx.textAlign = "left"; ctx.fillText(S.brandName, 16, 40);
+  ctx.textAlign = "right"; ctx.fillText(score + " puan  ⏱ " + Math.ceil(Math.max(0, timeLeft)), W - 16, 40);
+  ctx.font = "32px serif"; ctx.textAlign = "center";
+  for (const it of items) ctx.fillText(it.e, it.x, it.y);
+  ctx.fillStyle = S.color; ctx.beginPath(); ctx.roundRect(px - basket.w / 2, basket.y, basket.w, basket.h, 10); ctx.fill();
+}
+function finish() { running = false; $("sc").textContent = "Skorun: " + score; $("end").classList.remove("hidden"); }
+$("go").onclick = start; $("again").onclick = start; draw();
+
+// ===== Yönetim paneli: sayfayı ?admin ile aç (örn. site.com/?admin) =====
+const FIELDS = [
+  ["brandName","Marka adı","text"],["color","Marka rengi","color"],["title","Açılış başlığı","text"],["desc","Açıklama","text"],
+  ["good","Yakalanacak nesneler (virgülle)","list"],["bad","Kaçınılacak nesneler (virgülle)","list"],
+  ["duration","Süre (sn)","range",10,90,1],["badRatio","Bomba oranı (%)","range",0,60,1],["speed","Hız çarpanı","range",0.5,2.5,0.1],
+  ["basketW","Sepet genişliği","range",50,160,5],["goodPts","İyi nesne puanı","range",1,50,1],["badPts","Bomba cezası","range",0,50,1]];
+if (location.search.includes("admin")) { $("gear").classList.remove("hidden"); $("gear").onclick = openAdmin; }
+
+function openAdmin() {
+  running = false; const a = $("adm"); a.classList.remove("hidden");
+  a.innerHTML = '<h2>Yönetim</h2><input id="pin" type="password" placeholder="PIN"><button id="pk">Giriş</button><button id="px" class="alt">Kapat</button>';
+  $("px").onclick = () => location.reload();
+  $("pk").onclick = () => { if ($("pin").value === PIN) form(); else $("pin").value = ""; };
+}
+function form() {
+  const a = $("adm");
+  a.innerHTML = "<h2>Oyun Ayarları</h2>" + FIELDS.map(([k, l, t, mn, mx, st]) => {
+    const v = t === "list" ? S[k].join(",") : S[k];
+    if (t === "range") return `<label>${l}: <b id="v_${k}">${v}</b><input id="f_${k}" type="range" min="${mn}" max="${mx}" step="${st}" value="${v}" oninput="$('v_${k}').textContent=this.value"></label>`;
+    return `<label>${l}<input id="f_${k}" type="${t === "color" ? "color" : "text"}" value="${v}"></label>`;
+  }).join("") + '<div class="row"><button id="sv">Kaydet</button><button id="lk">Link oluştur</button><button id="rs" class="alt">Sıfırla</button><button id="cl" class="alt">Kapat</button></div><input id="lo" type="text" readonly class="hidden">';
+  const read = () => { const o = {}; for (const [k,,t] of FIELDS) { const v = $("f_" + k).value; o[k] = t === "range" ? +v : t === "list" ? v.split(",").map(s => s.trim()).filter(Boolean) : v; } if (!o.good.length) o.good = DEF.good; if (!o.bad.length) o.bad = DEF.bad; return o; };
+  $("sv").onclick = () => { try { localStorage.setItem("oyunCfg", JSON.stringify(read())); } catch (e) {} location.reload(); };
+  $("lk").onclick = () => { const l = location.origin + location.pathname + "?c=" + encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(read()))))); const o = $("lo"); o.value = l; o.classList.remove("hidden"); o.select(); try { navigator.clipboard.writeText(l); } catch (e) {} };
+  $("rs").onclick = () => { try { localStorage.removeItem("oyunCfg"); } catch (e) {} location.href = location.pathname + "?admin"; };
+  $("cl").onclick = () => location.reload();
+}
+</script>
+</body></html>
